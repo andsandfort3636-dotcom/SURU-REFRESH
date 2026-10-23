@@ -1,0 +1,6 @@
+{
+  "name": "Suru Auto",
+  "description": "Smart Chromium browser with automatic periodic webpage reload, 24/7 background service, and mini floating widget with Suru style branding.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
