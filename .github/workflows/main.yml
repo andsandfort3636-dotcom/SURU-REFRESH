@@ -23,6 +23,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Inspect project
+        run: |
+          ls -la
+          find . -maxdepth 3 \( -name gradlew -o -name settings.gradle -o -name settings.gradle.kts \) -print
 
       - name: Build APK
         run: |
