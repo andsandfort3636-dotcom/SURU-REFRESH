@@ -37,6 +37,12 @@ object AutoRefreshManager {
     private val _reloadTrigger = MutableSharedFlow<Long>(extraBufferCapacity = 1)
     val reloadTrigger = _reloadTrigger.asSharedFlow()
 
+    private val _loadUrlTrigger = MutableSharedFlow<String>(extraBufferCapacity = 2)
+    val loadUrlTrigger = _loadUrlTrigger.asSharedFlow()
+
+    @Volatile
+    var webViewReloadHandler: (() -> Unit)? = null
+
     fun init(context: Context) {
         if (prefs == null) {
             prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -70,6 +76,7 @@ object AutoRefreshManager {
         }
         _state.update { it.copy(url = cleanUrl, errorMessage = null) }
         prefs?.edit()?.putString(KEY_URL, cleanUrl)?.apply()
+        _loadUrlTrigger.tryEmit(cleanUrl)
     }
 
     fun setInterval(seconds: Int) {
@@ -187,6 +194,13 @@ object AutoRefreshManager {
             )
         }
         _reloadTrigger.tryEmit(now)
+
+        // Directly reload active WebView on Main thread for instantaneous full refresh
+        scope.launch(Dispatchers.Main) {
+            try {
+                webViewReloadHandler?.invoke()
+            } catch (_: Exception) {}
+        }
 
         // Red blink for 2 seconds (1-3 sec duration as requested)
         blinkJob?.cancel()
