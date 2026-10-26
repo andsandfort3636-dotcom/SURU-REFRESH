@@ -78,9 +78,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        // Save battery and CPU in background
-        webView?.onPause()
-        webView?.pauseTimers()
+        // If auto-refresh is running, keep WebView alive and processing so background reload works!
+        if (!AutoRefreshManager.state.value.isRunning) {
+            webView?.onPause()
+            webView?.pauseTimers()
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // If auto-refresh is running, keep WebView alive in background!
+        if (!AutoRefreshManager.state.value.isRunning) {
+            webView?.onPause()
+            webView?.pauseTimers()
+        }
     }
 
     override fun onResume() {

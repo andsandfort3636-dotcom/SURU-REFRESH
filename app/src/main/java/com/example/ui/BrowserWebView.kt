@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.http.SslError
 import android.view.ViewGroup
@@ -42,20 +43,51 @@ fun BrowserWebView(
     val desktopUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     val defaultUserAgent = remember { WebSettings.getDefaultUserAgent(context) }
 
+    fun rePasteAndLoadUrl(wv: WebView) {
+        val targetUrl = if (!wv.url.isNullOrBlank() && wv.url != "about:blank") {
+            wv.url!!
+        } else {
+            AutoRefreshManager.state.value.url
+        }
+        if (targetUrl.isNotBlank()) {
+            if (AutoRefreshManager.state.value.clearCacheOnRefresh) {
+                wv.clearCache(true)
+            }
+            // Cut and re-paste URL and press enter: stop current loading and navigate from scratch!
+            wv.stopLoading()
+            wv.loadUrl(targetUrl)
+        }
+    }
+
     // Listen for reload trigger events
     LaunchedEffect(Unit) {
         AutoRefreshManager.reloadTrigger.collectLatest {
             webViewInstance?.let { wv ->
-                if (state.clearCacheOnRefresh) {
-                    wv.clearCache(true)
-                }
-                // Refresh the exact active URL the user is currently browsing
-                val activeUrl = wv.url
-                if (!activeUrl.isNullOrBlank() && activeUrl != "about:blank") {
-                    wv.reload()
-                } else {
-                    wv.loadUrl(state.url)
-                }
+                rePasteAndLoadUrl(wv)
+            }
+        }
+    }
+
+    // Register direct reload handler for instant execution even in background
+    DisposableEffect(Unit) {
+        AutoRefreshManager.webViewReloadHandler = {
+            webViewInstance?.let { wv ->
+                rePasteAndLoadUrl(wv)
+            }
+        }
+        onDispose {
+            AutoRefreshManager.webViewReloadHandler = null
+            webViewInstance?.stopLoading()
+        }
+    }
+
+    // Listen for explicit URL navigation requests (from Omnibox or presets)
+    LaunchedEffect(Unit) {
+        AutoRefreshManager.loadUrlTrigger.collectLatest { targetUrl ->
+            if (targetUrl.isNotBlank() && webViewInstance != null) {
+                loadedUrl = targetUrl
+                webViewInstance?.stopLoading()
+                webViewInstance?.loadUrl(targetUrl)
             }
         }
     }
@@ -64,23 +96,9 @@ fun BrowserWebView(
     LaunchedEffect(state.desktopMode) {
         webViewInstance?.let { wv ->
             wv.settings.userAgentString = if (state.desktopMode) desktopUserAgent else defaultUserAgent
-            wv.settings.useWideViewPort = state.desktopMode
-            wv.settings.loadWithOverviewMode = state.desktopMode
-            wv.reload()
-        }
-    }
-
-    // React to URL changes if the user entered a different URL from the Omnibox or presets
-    LaunchedEffect(state.url) {
-        if (state.url.isNotEmpty() && state.url != loadedUrl && state.url != webViewInstance?.url && webViewInstance != null) {
-            loadedUrl = state.url
-            webViewInstance?.loadUrl(state.url)
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            webViewInstance?.stopLoading()
+            wv.settings.useWideViewPort = true
+            wv.settings.loadWithOverviewMode = true
+            rePasteAndLoadUrl(wv)
         }
     }
 
@@ -98,11 +116,15 @@ fun BrowserWebView(
                         javaScriptEnabled = true
                         domStorageEnabled = true
                         databaseEnabled = true
+                        javaScriptCanOpenWindowsAutomatically = true
+                        mediaPlaybackRequiresUserGesture = false
                         setSupportZoom(true)
                         builtInZoomControls = true
                         displayZoomControls = false
-                        useWideViewPort = state.desktopMode
+                        useWideViewPort = true
                         loadWithOverviewMode = true
+                        allowFileAccess = false
+                        allowContentAccess = true
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         cacheMode = WebSettings.LOAD_DEFAULT
                         userAgentString = if (state.desktopMode) desktopUserAgent else defaultUserAgent
@@ -134,9 +156,28 @@ fun BrowserWebView(
                     }
 
                     webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val url = request?.url?.toString() ?: return false
+                            if (url.startsWith("http://") || url.startsWith("https://")) {
+                                return false // Keep inside this WebView so it always keeps running!
+                            }
+                            return try {
+                                val intent = Intent(Intent.ACTION_VIEW, request.url).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                view?.context?.startActivity(intent)
+                                true
+                            } catch (_: Exception) {
+                                true
+                            }
+                        }
+
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             super.onPageStarted(view, url, favicon)
                             val currentUrl = view?.url ?: url
+                            if (!currentUrl.isNullOrBlank() && currentUrl != "about:blank") {
+                                loadedUrl = currentUrl
+                            }
                             AutoRefreshManager.updatePageStatus(
                                 url = currentUrl,
                                 title = view?.title,
@@ -149,7 +190,9 @@ fun BrowserWebView(
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             val currentUrl = view?.url ?: url
-                            loadedUrl = currentUrl
+                            if (!currentUrl.isNullOrBlank() && currentUrl != "about:blank") {
+                                loadedUrl = currentUrl
+                            }
                             AutoRefreshManager.updatePageStatus(
                                 url = currentUrl,
                                 title = view?.title,
@@ -185,13 +228,17 @@ fun BrowserWebView(
                         ) {
                             super.onReceivedError(view, request, error)
                             if (request?.isForMainFrame == true) {
-                                val desc = error?.description?.toString() ?: "Failed to load page"
-                                AutoRefreshManager.updatePageStatus(
-                                    title = null,
-                                    progress = 100,
-                                    isLoading = false,
-                                    error = desc
-                                )
+                                val errorCode = error?.errorCode ?: 0
+                                val desc = error?.description?.toString() ?: ""
+                                // Error code -1 / ERR_ABORTED is normal on redirects
+                                if (errorCode != -1 && !desc.contains("ERR_ABORTED", ignoreCase = true)) {
+                                    AutoRefreshManager.updatePageStatus(
+                                        title = null,
+                                        progress = 100,
+                                        isLoading = false,
+                                        error = desc.ifBlank { "Failed to load page" }
+                                    )
+                                }
                             }
                         }
 
@@ -200,7 +247,6 @@ fun BrowserWebView(
                             handler: SslErrorHandler?,
                             error: SslError?
                         ) {
-                            // Proceed for dev/testing or standard sites
                             handler?.proceed()
                         }
                     }
