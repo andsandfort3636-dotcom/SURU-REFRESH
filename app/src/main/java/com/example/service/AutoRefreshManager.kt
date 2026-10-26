@@ -29,6 +29,7 @@ object AutoRefreshManager {
     private val scope = CoroutineScope(Dispatchers.Default)
     private var timerJob: Job? = null
     private var blinkJob: Job? = null
+    private var loadingWatchdogJob: Job? = null
     private var prefs: SharedPreferences? = null
 
     private val _state = MutableStateFlow(RefreshState())
@@ -190,7 +191,9 @@ object AutoRefreshManager {
                 totalRefreshes = it.totalRefreshes + 1,
                 lastRefreshTime = now,
                 remainingSeconds = calculateNextInterval(),
-                isReloadBlinking = true
+                isReloadBlinking = true,
+                isLoading = true,
+                pageProgress = 25
             )
         }
         _reloadTrigger.tryEmit(now)
@@ -207,6 +210,15 @@ object AutoRefreshManager {
         blinkJob = scope.launch {
             delay(2000L)
             _state.update { it.copy(isReloadBlinking = false) }
+        }
+
+        // Loading watchdog: auto-finish loading indicator after 4 seconds
+        loadingWatchdogJob?.cancel()
+        loadingWatchdogJob = scope.launch {
+            delay(4000L)
+            _state.update {
+                if (it.isLoading) it.copy(isLoading = false, pageProgress = 100) else it
+            }
         }
     }
 
@@ -238,17 +250,34 @@ object AutoRefreshManager {
 
     fun updatePageStatus(url: String? = null, title: String? = null, progress: Int, isLoading: Boolean, error: String? = null) {
         val validUrl = if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) url else null
+        val effectiveLoading = if (progress >= 70) false else isLoading
+        val effectiveProgress = if (!effectiveLoading) 100 else progress
+
         _state.update {
             it.copy(
                 url = validUrl ?: it.url,
                 pageTitle = if (!title.isNullOrBlank()) title else it.pageTitle,
-                pageProgress = progress,
-                isLoading = isLoading,
+                pageProgress = effectiveProgress,
+                isLoading = effectiveLoading,
                 errorMessage = error
             )
         }
         if (validUrl != null) {
             prefs?.edit()?.putString(KEY_URL, validUrl)?.apply()
+        }
+
+        if (effectiveLoading) {
+            // Watchdog: If page streams logs or stalls, complete loading after 4s max
+            loadingWatchdogJob?.cancel()
+            loadingWatchdogJob = scope.launch {
+                delay(4000L)
+                _state.update {
+                    if (it.isLoading) it.copy(isLoading = false, pageProgress = 100) else it
+                }
+            }
+        } else {
+            loadingWatchdogJob?.cancel()
+            loadingWatchdogJob = null
         }
     }
 

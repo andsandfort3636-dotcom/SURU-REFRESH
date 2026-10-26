@@ -143,11 +143,12 @@ fun BrowserWebView(
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
                             super.onProgressChanged(view, newProgress)
+                            val stillLoading = newProgress < 75
                             AutoRefreshManager.updatePageStatus(
                                 url = view?.url,
                                 title = view?.title,
                                 progress = newProgress,
-                                isLoading = newProgress < 100
+                                isLoading = stillLoading
                             )
                         }
 

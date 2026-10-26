@@ -552,33 +552,33 @@ class FloatingBubbleService : Service() {
                     stopRedBlinkEffect()
 
                     if (state.isLoading) {
-                        // Actively Loading state
+                        // Actively Loading state: Cyan border & dot, but countdown timer ALWAYS ticks!
                         val cyan = Color.parseColor("#00E5FF")
                         bubbleContainer?.background = createBubbleBackground(cyan)
                         setDotColor(bubbleStatusIndicator, cyan)
-                        timerText?.text = if (state.pageProgress in 1..99) "${state.pageProgress}%" else "LOAD"
+                        timerText?.text = formatTimeRemaining(state.remainingSeconds)
                         timerText?.setTextColor(cyan)
 
-                        popupStatusText?.text = "Suru Auto: Loading (${state.pageProgress}%)"
+                        popupStatusText?.text = "Suru Auto: Active (${formatTimeRemaining(state.remainingSeconds)})"
                         popupStatusText?.setTextColor(cyan)
 
                         setPillStyle(popupActivityIndicator, Color.parseColor("#05232A"), cyan)
                         setDotColor(popupActivityDot, cyan)
-                        popupActivityText?.text = "⚡ Actively Loading (${state.pageProgress}%)"
+                        popupActivityText?.text = "⚡ Loading Page (${state.pageProgress}%)"
                         popupActivityText?.setTextColor(cyan)
 
                         popupProgressBar?.visibility = View.VISIBLE
                         popupProgressBar?.isIndeterminate = false
                         popupProgressBar?.progress = state.pageProgress
                     } else if (state.isRunning && !state.isPaused) {
-                        // Waiting to Refresh state
+                        // Waiting to Refresh state: Emerald Green border, dot, and white countdown timer
                         val green = Color.parseColor("#34A853")
                         bubbleContainer?.background = createBubbleBackground(green)
                         setDotColor(bubbleStatusIndicator, green)
                         timerText?.text = formatTimeRemaining(state.remainingSeconds)
                         timerText?.setTextColor(Color.WHITE)
 
-                        popupStatusText?.text = "Suru Auto: Active"
+                        popupStatusText?.text = "Suru Auto: Active (${formatTimeRemaining(state.remainingSeconds)})"
                         popupStatusText?.setTextColor(green)
 
                         setPillStyle(popupActivityIndicator, Color.parseColor("#0E2A1A"), Color.parseColor("#238636"))
