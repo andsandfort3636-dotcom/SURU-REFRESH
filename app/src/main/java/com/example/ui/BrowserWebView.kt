@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.http.SslError
+import android.os.Build
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
@@ -112,6 +114,8 @@ fun BrowserWebView(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
 
+                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
@@ -128,6 +132,9 @@ fun BrowserWebView(
                         mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         cacheMode = WebSettings.LOAD_DEFAULT
                         userAgentString = if (state.desktopMode) desktopUserAgent else defaultUserAgent
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            safeBrowsingEnabled = false
+                        }
                     }
 
                     CookieManager.getInstance().setAcceptCookie(true)
